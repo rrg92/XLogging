@@ -26,7 +26,8 @@ Function GetLogObject {
 		BufferIsHost=$false
 		IgnoreLogFail=$true
 		HConfigs = @{} #Specific configurations specific for each handler. This configurations overrides global.
-
+		IdentString = "`t" #Controls the character used for identiation.
+		
 		#Contains internal data must be not modified by user.
 		internal=@{
 					START_TS=(Get-Date)
@@ -35,6 +36,11 @@ Function GetLogObject {
 					FILE_INITIALIZED=$false
 					RETAINING=$FALSE
 					RETAINED_LOG_PACKETS=@()
+					IDENT_CONTROL = @{
+							CURRENT_LEVEL=0
+							SCHEDULED_LEVEL=$null
+							IDENT_MARKS=@{} #Used to track marks
+						}
 				} 
 	}
 
@@ -45,10 +51,7 @@ Function GetLogObject {
 		#This is a deprecitated. Use LogEx instead.
 		$LogMethod = [scriptblock]::create({
 			param($message,$Level = $null,$forceNoBuffer=$false,$fcolor=$null,$bcolor=$null,$options = @{})
-			
-			
-			
-			
+
 			return $this.LogEx(@{
 					message = $Message
 					level = $LEVEL
@@ -61,6 +64,24 @@ Function GetLogObject {
 		$LogMethodEx = [scriptblock]::create({
 			param($Options = @{})
 			
+			<#
+				All log methods Options:
+					message 		- The message to be logged
+					Level 			- The message level
+					forceNoBuffer 	- Forces message not to be bufferized, when buffering is enabled.
+					bcolor 			- Background color. Useful with destination that accept formating.
+					fcolor 			- Foreground color. Useful with destination that accept formating.
+					reatain 		- Retain message up to a flush.
+					flush 			- Force all reatined messages to be flushed.
+					identRaise 		- Raises the ident a specific level.
+					identDrop		- Drops ident a specific level number
+					identSave		- Save current level to internal level store.
+					identReset		- Restore a saved level and drops by default.
+					identKeepLevel	- Indicates that level must be maintaned when reseted.
+					identLevel		- Sets the ident levelt o this value.
+					identSkipSched	- Ignore any scheduled value.	
+			#>
+			
 			try {
 				$DestinationHandlers = $this.internal.DESTINATON_HANDLERS;
 				$LOG_LEVELS = GetLogLevels
@@ -68,6 +89,63 @@ Function GetLogObject {
 				$LogPacket.forceNoBuffer = $Options.forceNoBuffer;
 				$LogPacket.style.BackgroundColor = $Options.bcolor
 				$LogPacket.style.ForegroundColor = $Options.fcolor
+
+				#Calculating identiation
+				
+				if($this.internal.IDENT_CONTROL.SCHEDULED_LEVEL){
+					if(!$Options.identSkipSched){
+						$this.internal.IDENT_CONTROL.CURRENT_LEVEL = $this.internal.IDENT_CONTROL.SCHEDULED_LEVEL
+					}
+					
+					$this.internal.IDENT_CONTROL.SCHEDULED_LEVEL = $null;
+				}
+				
+				$finalIdentLevel 	= $this.internal.IDENT_CONTROL.CURRENT_LEVEL;
+				$finalIdentString	= $this.identString;
+
+				if($Options.identReset){
+					
+					if($this.internal.IDENT_CONTROL.IDENT_MARKS.Contains($Options.identReset)){
+						$LevelToRestore = $Options.identReset
+						$finalIdentLevel = $this.internal.IDENT_CONTROL.IDENT_MARKS.$LevelToRestore
+						
+						if(!$Options.identKeepLevel){
+							$this.internal.IDENT_CONTROL.IDENT_MARKS.remove($LevelToRestore);
+						} else {
+							$finalIdentString = "(IDENTATION_ERROR_RESET_DONTEXISTS: $LevelToRestore already not exists)"
+							$finalIdentLevel  = 1;
+						}
+					}
+					
+					
+				}
+				elseif($Options.identLevel -ge 0){
+					$finalIdentLevel = $Options.identLevel;
+					$this.internal.IDENT_CONTROL.CURRENT_LEVEL = $finalIdentLevel;
+				}
+				else {
+					if($Options.identRaise){
+						$this.internal.IDENT_CONTROL.SCHEDULED_LEVEL  = $finalIdentLevel + $Options.identRaise;
+					}
+					elseif($Options.identDrop){
+						$finalIdentLevel -= $Options.identDrop;
+					}
+				}
+				
+				if($Options.identSave){
+					$IdentToSave = $Options.identSave;
+					if($IdentToSave -and $this.internal.IDENT_CONTROL.IDENT_MARKS.Contains($IdentToSave)){
+						$finalIdentString = "(IDENTATION_ERROR_SAVING_EXISTS: $IdentToSave already exists)"
+						$finalIdentLevel  = 1;
+					} else {
+						$LevelToSave = $this.internal.IDENT_CONTROL.CURRENT_LEVEL;
+						$this.internal.IDENT_CONTROL.IDENT_MARKS.add($IdentToSave,$LevelToSave);
+					}
+				}
+
+				$LogPacket.identString=$finalIdentString;
+				$LogPacket.identLevel=$finalIdentLevel;
+
 				
 				if($options.retain -ne $null){
 					$LogPacket.retain = $options.retain;
@@ -260,11 +338,22 @@ Function NewLogPacket {
 		retain=$false;
 		flush=$false;
 		flushedPackets=@()
+		identLevel=0;
+		identString=$null;
 	}
 	
 	$getSimpleMessageMethod = [scriptblock]::create({
 		$tsString = $this.ts.toString("yyyy-MM-dd HH:mm:ss");
-		$finalLogMessage = "$tsString "
+		
+		if($this.identString -and $this.identLevel -gt 0){
+			#Calculates number of ident string.
+			$Identation = $this.identString * $this.identLevel;
+		} else {
+			$Identation = "";
+		}
+
+		
+		$finalLogMessage = "$tsString $Identation"
 		
 		if($this.flushedPackets){
 			$this.flushedPackets | %{
@@ -472,3 +561,5 @@ Function GetLogDestinationsHandlers {
 	}
 
 }
+
+

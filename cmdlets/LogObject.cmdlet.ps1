@@ -49,9 +49,12 @@ Function Invoke-Log {
 			[switch]$ForceNoBuffer = $false
 			
 		,#Foreground color of the message. Applicable to some logging targets, like host.
-			$fcolor  = $null
+			[Alias("fcolor")]
+			$ForegroundColor  = $null
+			
 		,#Background color of the message. Applicable to some logging targets, like host.
-			$bcolor = $null
+			[Alias("bcolor")]
+			$BackgroundColor = $null
 			
 		,#Enable retain mode. This force all next logged messages, and this one, to be retained, up to Flush be used.
 			[switch]$Retain = $false
@@ -59,19 +62,67 @@ Function Invoke-Log {
 		,#Flush all reatined messages and disable retain mode.
 			[switch]$Flush = $false
 			
+		,#Raises de ident level
+			[switch]$RaiseIdent = $false
+			
+		,#Raises de ident level
+			[switch]$DropIdent = $false
+			
+		,#Saves ident current value
+			$SaveIdent = $null
+
+		,#Saves ident current value
+			$ResetIdent = $null
+			
+		,#Value of ident level
+			$IdentLevel = $null
+			
+		,#Keep current level when reseting.
+			[switch]$KeepLevel = $false
+			
+		,#Keep current level when reseting.
+			[switch]$SkipScheduledIdent = $false
+			
 		,#This is the log object! Use the New-LogObject to create one.
 			[Parameter(Mandatory=$true,ValueFromPipeline=$true)]
 			$LogObject
 		
 	)
 	
-	$Params = (GetAllCmdLetParams);
+	$identRaise = 0;
+	$identDrop = 0;
 	
-	$LogOptions = @{};
-	foreach($param in $Params.GetEnumerator()){
-		$LogOptions.add($param.Name,$param.Value);
-		write-verbose "Param: $($param.Name) Value: $($param.Value)"  ;
+	if($RaiseIdent){
+		$identRaise = $IdentLevel;
+		if(!$identRaise){
+			$identRaise = 1;
+		}
 	}
+
+	if($DropIdent){
+		$identDrop = $IdentLevel;
+		if(!$identDrop){
+			$identDrop = 1;
+		}
+	}
+	
+	$LogOptions = @{
+		message 		= $message
+		Level 			= $Level
+		forceNoBuffer 	= $ForceNoBuffer
+		bcolor 			= $BackgroundColor
+		fcolor 			= $ForegroundColor
+		retain 			= $Retain
+		flush 			= $Flush
+		identRaise 		= $identRaise
+		identDrop		= $identDrop
+		identSave		= $SaveIdent
+		identReset		= $ResetIdent
+		identKeepLevel	= $KeepLevel
+		identLevel		= $IdentLevel
+		identSkipSched	= $SkipScheduledIdent
+	};
+		
 	
 	return $LogObject.LogEx($LogOptions)
 		

@@ -1,12 +1,25 @@
 Function Test-LogObject {
 	[CmdLetBinding()]
-	param($Path = $null, [switch]$Screen = $false,[switch]$Buffer = $false,$LogLevel = 3,$LoggingNumber = 15,$BufferIsHostDelay = 1,[switch]$BufferIsHost = $false, $RandomColoring=$null,$RetainedInterval = 1,$RetainedCount = 5)
+	param($Path = $null 
+			,[switch]$Screen = $false
+			,[switch]$Buffer = $false
+			,$LogLevel = 3
+			,$LoggingNumber = 15
+			,$BufferIsHostDelay = 1
+			,[switch]$BufferIsHost = $false
+			, $RandomColoring=$null
+			,$RetainedInterval = 1
+			,$RetainedCount = 5
+			,$IdentString = "`t"
+	)
 	
 	try {
 
-		$o = GetLogObject
+		$o = New-LogObject
 		$o.LogTo = @()
 		$o.BufferIsHost = $BufferIsHost;
+		$o.IgnoreLogFail = $false;
+		$o.IdentString = $IdentString;
 		
 		if($Screen) {
 			$o.LogTo += "#"
@@ -25,20 +38,34 @@ Function Test-LogObject {
 		}
 		
 		if($BufferIsHost){
-			$o.log("THIS WAS FORCED!","PROGRESS",$true)
+			$o | Invoke-Log "THIS WAS FORCED!" "PROGRESS" -ForceNoBuffer
 		}
 		
-		$o.log("Color logging $_","PROGRESS",$false,"Red")
+		#coloring test...
+		$o | Invoke-Log "Color logging" "PROGRESS" -ForegroundColor "Red"; 
 		
-		$o.log("Retained Start!!!","PROGRESS",$false,$null,$null,@{retain=$true})
+		#Identation
+		$o | Invoke-Log "TESTING IDENTATION"
+		$o | Invoke-Log "1" 		-RaiseIdent -SaveIdent "B_1.1"
+		$o | Invoke-Log "1.1" 		-RaiseIdent -SaveIdent "B_1.1.1"
+		$o | Invoke-Log "1.1.1"
+		$o | Invoke-Log "1.1.2" 	-RaiseIdent 
+		$o | Invoke-Log "1.1.2.1"	
+		$o | Invoke-Log "1.1.3"		-DropIdent
+		$o | Invoke-Log "1.2"		-ResetIdent "B_1.1.1"
+		$o | Invoke-Log "2" 		-IdentLevel 0
+		$o | Invoke-Log "3"
 		
+		#buffering (retain) test
+		$o | Invoke-Log "Retained Start!!!" "PROGRESS" -Retain
+	
 		1..$RetainedCount | %{
-			$TestLogLevel = Get-Random -Minimum 1 -Maximum 5
-			$o.log("Retained message $_ - LogLevel: $TestLogLevel ",$TestLogLevel,$false,$null,$null)
+			$TestLogLevel = Get-Random -Minimum 1 -Maximum 5	
+			$o | Invoke-Log "Retained message $_ - LogLevel: $TestLogLevel " $TestLogLevel 
 			Start-Sleep -s $RetainedInterval
 		}
 		
-		$o.log("Flushed message","PROGRESS",$false,$null,$null,@{flush=$true})
+		$o | Invoke-Log "Flushed message" "PROGRESS" -Flush
 		
 		
 		1..$LoggingNumber | %{
@@ -71,10 +98,13 @@ Function Test-LogObject {
 				$bcolorText = ""
 			}
 			
-			$o.log(" $fcolorText $bcolorText TestLog $_ LogLevel $TestLogLevel",$TestLogLevel,$false,$fcolor,$bcolor);
+			$o | Invoke-Log " $fcolorText $bcolorText TestLog $_ LogLevel $TestLogLevel" $TestLogLevel -fcolor $fcolor -bcolor $bcolor
 			
 			Start-Sleep -s $BufferIsHostDelay
 		}
+		
+		
+
 
 	} finally {
 		write-host ">>> LOGGIN TEST FINIHED. CHECK NEXT RESULTS."
