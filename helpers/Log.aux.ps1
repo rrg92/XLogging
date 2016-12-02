@@ -41,11 +41,140 @@ Function GetLogObject {
 							SCHEDULED_LEVEL=$null
 							IDENT_MARKS=@{} #Used to track marks
 						}
+					METHODS = @{};
 				} 
 	}
 
 	$o = New-Object PsObject -Prop $PublicProperties
 	
+	#INTERNAL METHODS
+		
+		$o.internal.METHODS = @{
+		
+			CalculateIdentation = [scriptblock]::create({
+				param($LogPacket, $Options)
+				
+				$LogObject = $LogPacket.LogObject;
+				#Calculating identiation
+				if($LogObject.internal.IDENT_CONTROL.SCHEDULED_LEVEL -and !$Options.identKeepFlow){
+					if(!$Options.identSkipSched){
+						$LogObject.setIdentLevel($LogObject.internal.IDENT_CONTROL.SCHEDULED_LEVEL);
+					}
+					
+					$LogObject.internal.IDENT_CONTROL.SCHEDULED_LEVEL = $null;
+				}
+				
+				$finalIdentLevel 	= $LogObject.getIdentLevel();
+				$finalIdentString	= $LogObject.identString;
+				
+
+				#If user wants reset the level!
+				if($Options.identReset){
+					$finalIdentLevel 	= $LogObject.getIdentLevel();
+					$finalIdentString	= $LogObject.identString;
+					
+					if($LogObject.internal.IDENT_CONTROL.IDENT_MARKS.Contains($Options.identReset)){
+						$LevelToRestore = $Options.identReset
+						$finalIdentLevel = $LogObject.internal.IDENT_CONTROL.IDENT_MARKS.$LevelToRestore
+						
+						if(!$Options.identKeepLevel){
+							$LogObject.internal.IDENT_CONTROL.IDENT_MARKS.remove($LevelToRestore);
+						} else {
+							$finalIdentString = "(IDENTATION_ERROR_RESET_DONTEXISTS: $LevelToRestore already not exists)"
+							$finalIdentLevel  = 1;
+						}
+					}
+				}
+				
+				#If user wants drops the level.
+				if($Options.identDrop){
+					$LogObject.dropIdent($Options.identDrop,$finalIdentLevel)
+					#The dropIdent method updates current level...
+					$finalIdentLevel = $LogObject.getIdentLevel();
+				}
+				
+				#If user wants raise the level. Note that if a drop was specified, the level after the drop will be used.
+				if($Options.identRaise){
+					if($Options.identApplyThis){
+						$finalIdentLevel += $Options.identRaise;
+						if(!$Options.identKeepFlow){
+							$LogObject.setIdentLevel($finalIdentLevel);
+						}
+					} else {
+						$LogObject.internal.IDENT_CONTROL.SCHEDULED_LEVEL  = $finalIdentLevel + $Options.identRaise;
+					}
+				}
+				
+
+
+				#If user specifies a level, then apply it. This override all previous calculates levels.
+				if($Options.identLevel -ge 0){
+					$finalIdentLevel = $Options.identLevel;
+					$LogObject.setIdentLevel($finalIdentLevel);
+				}
+				
+				#If user want save the level.
+				if($Options.identSave){
+					$IdentToSave = $Options.identSave;
+					if($IdentToSave -and $LogObject.internal.IDENT_CONTROL.IDENT_MARKS.Contains($IdentToSave)){
+						$finalIdentString = "(IDENTATION_ERROR_SAVING_EXISTS: $IdentToSave already exists)"
+						$finalIdentLevel  = 1;
+					} else {
+						$LevelToSave = $LogObject.getIdentLevel();
+						$LogObject.internal.IDENT_CONTROL.IDENT_MARKS.add($IdentToSave,$LevelToSave);
+					}
+				}
+				
+				$LogPacket.identString=$finalIdentString;
+				$LogPacket.identLevel=$finalIdentLevel;
+			})
+		
+			ConfigureLogPacket = [scriptblock]::create({
+				param($LogObject, $Options)
+				
+				$LogPacket = (NewLogPacket -LogObject $LogObject -message $Options.message -ts (Get-Date) -level $Options.Level);
+				$LogPacket.forceNoBuffer = $Options.forceNoBuffer;
+				$LogPacket.style.BackgroundColor = $Options.bcolor;
+				$LogPacket.style.ForegroundColor = $Options.fcolor
+				
+				#Call configure identition...
+				& $LogObject.internal.METHODS.CalculateIdentation -LogPacket $LogPacket -Options $Options;
+				
+				if($options.retain -ne $null){
+					$LogPacket.retain = $options.retain;
+				}
+				
+				if($options.flush -ne $null){
+					$LogPacket.flush = $options.flush;
+				}
+				
+				if($Options.noUseTimestamp){
+					$LogPacket.noUseTimestamp = $true;
+				}
+				
+				#Determining current level, if not already determined.
+				if(!$LogPacket.level){
+					$LogPacket.level = "PROGRESS"  #Default...
+	
+					if($LogObject.UseDLD){		
+						$DDLScriptToUse = $LogObject.DLDScript
+						if(!$DDLScriptToUse){
+							$DDLScriptToUse = {param($LogPacket) (DefaultDDLScript $LogPacket) }
+						}
+						
+						$LogPacket.level = & $DDLScriptToUse $LogPacket
+						
+						if(!(ValidateLogLevel $LogPacket.level)){
+							$LogPacket.level = "PROGRESS"
+						}
+					}
+				}
+				
+				return $LogPacket;
+			})
+	
+		}
+		
 	#METHODS
 	
 		#This is a deprecitated. Use LogEx instead.
@@ -80,99 +209,18 @@ Function GetLogObject {
 					identKeepLevel	- Indicates that level must be maintaned when reseted.
 					identLevel		- Sets the ident levelt o this value.
 					identSkipSched	- Ignore any scheduled value.	
+					identApplyThis	- Apply ident operation just on current log packet.
+					identKeepFlow	- Dont change flow for next packets. Useful only with applyThis.
+					blankLine		- write a blank line to the log. All other params will ignored.
+					noUseTimestamp	- dont put a timestamp on final message.
 			#>
 			
 			try {
 				$DestinationHandlers = $this.internal.DESTINATON_HANDLERS;
 				$LOG_LEVELS = GetLogLevels
-				$LogPacket = (NewLogPacket -LogObject $this -message $Options.message -ts (Get-Date) -level $Options.Level)
-				$LogPacket.forceNoBuffer = $Options.forceNoBuffer;
-				$LogPacket.style.BackgroundColor = $Options.bcolor
-				$LogPacket.style.ForegroundColor = $Options.fcolor
-
-				#Calculating identiation
-				
-				if($this.internal.IDENT_CONTROL.SCHEDULED_LEVEL){
-					if(!$Options.identSkipSched){
-						$this.internal.IDENT_CONTROL.CURRENT_LEVEL = $this.internal.IDENT_CONTROL.SCHEDULED_LEVEL
-					}
-					
-					$this.internal.IDENT_CONTROL.SCHEDULED_LEVEL = $null;
-				}
-				
-				$finalIdentLevel 	= $this.internal.IDENT_CONTROL.CURRENT_LEVEL;
-				$finalIdentString	= $this.identString;
-
-				if($Options.identReset){
-					
-					if($this.internal.IDENT_CONTROL.IDENT_MARKS.Contains($Options.identReset)){
-						$LevelToRestore = $Options.identReset
-						$finalIdentLevel = $this.internal.IDENT_CONTROL.IDENT_MARKS.$LevelToRestore
-						
-						if(!$Options.identKeepLevel){
-							$this.internal.IDENT_CONTROL.IDENT_MARKS.remove($LevelToRestore);
-						} else {
-							$finalIdentString = "(IDENTATION_ERROR_RESET_DONTEXISTS: $LevelToRestore already not exists)"
-							$finalIdentLevel  = 1;
-						}
-					}
-					
-					
-				}
-				elseif($Options.identLevel -ge 0){
-					$finalIdentLevel = $Options.identLevel;
-					$this.internal.IDENT_CONTROL.CURRENT_LEVEL = $finalIdentLevel;
-				}
-				else {
-					if($Options.identRaise){
-						$this.internal.IDENT_CONTROL.SCHEDULED_LEVEL  = $finalIdentLevel + $Options.identRaise;
-					}
-					elseif($Options.identDrop){
-						$finalIdentLevel -= $Options.identDrop;
-					}
-				}
-				
-				if($Options.identSave){
-					$IdentToSave = $Options.identSave;
-					if($IdentToSave -and $this.internal.IDENT_CONTROL.IDENT_MARKS.Contains($IdentToSave)){
-						$finalIdentString = "(IDENTATION_ERROR_SAVING_EXISTS: $IdentToSave already exists)"
-						$finalIdentLevel  = 1;
-					} else {
-						$LevelToSave = $this.internal.IDENT_CONTROL.CURRENT_LEVEL;
-						$this.internal.IDENT_CONTROL.IDENT_MARKS.add($IdentToSave,$LevelToSave);
-					}
-				}
-
-				$LogPacket.identString=$finalIdentString;
-				$LogPacket.identLevel=$finalIdentLevel;
 
 				
-				if($options.retain -ne $null){
-					$LogPacket.retain = $options.retain;
-				}
-				
-				if($options.flush -ne $null){
-					$LogPacket.flush = $options.flush;
-				}
-				
-				#Determining current level, if not already determined.
-				if(!$LogPacket.level){
-					$LogPacket.level = "PROGRESS"  #Default...
-	
-					if($this.UseDLD){		
-						$DDLScriptToUse = $this.DLDScript
-						if(!$DDLScriptToUse){
-							$DDLScriptToUse = {param($LogPacket) (DefaultDDLScript $LogPacket) }
-						}
-						
-						$LogPacket.level = & $DDLScriptToUse $LogPacket
-						
-						if(!(ValidateLogLevel $LogPacket.level)){
-							$LogPacket.level = "PROGRESS"
-						}
-					}
-				}
-				
+				$LogPacket = & $this.internal.METHODS.ConfigureLogPacket -LogObject $this -Options $Options;
 
 				#At this point we can determine if loggin must be out...
 				
@@ -301,11 +349,45 @@ Function GetLogObject {
 				return $can;
 			})
 			
+		
+		#Drops current identation by specific number of times.
+		#This is useful for drop identation without a logging a message. Useful in loops.
+		$DropIdentMethod = [scriptblock]::create({
+				param([int]$DropCount = 1, $finalIdentLevel = $null)
+		
+				if(!$finalIdentLevel){
+					$finalIdentLevel = $LogObject.internal.IDENT_CONTROL.CURRENT_LEVEL;
+				}
+		
+				$finalIdentLevel -= $DropCount;
+				$this.internal.IDENT_CONTROL.CURRENT_LEVEL = $finalIdentLevel;
+				return;
+			})
+			
+		#Gets current identation level.
+		$GetIdentMethod = 	[scriptblock]::create({
+				return $this.internal.IDENT_CONTROL.CURRENT_LEVEL;
+			})
+		
+		#Set current ident level to a specified in param.
+		$SetIdentMethod = 	[scriptblock]::create({
+				param($Level)
+				
+				if($Level -ge 0){
+					$this.internal.IDENT_CONTROL.CURRENT_LEVEL = $Level;
+				}
+				
+			})
+		
+			
 	$o | Add-Member -Type ScriptMethod -Name Log -Value  $LogMethod;
 	$o | Add-Member -Type ScriptMethod -Name LogEx -Value  $LogMethodEx;
 	$o | Add-Member -Type ScriptMethod -Name LogSQLErrors -Value  $LogSQLErrors;
 	$o | Add-Member -Type ScriptMethod -Name isInVerbose -Value  $InVerboseMode
 	$o | Add-Member -Type ScriptMethod -Name canLog -Value  $canLog
+	$o | Add-Member -Type ScriptMethod -Name dropIdent -Value  $DropIdentMethod
+	$o | Add-Member -Type ScriptMethod -Name getIdentLevel -Value  $GetIdentMethod
+	$o | Add-Member -Type ScriptMethod -Name setIdentLevel -Value  $SetIdentMethod
 
 	return $o;
 }
@@ -340,10 +422,17 @@ Function NewLogPacket {
 		flushedPackets=@()
 		identLevel=0;
 		identString=$null;
+		noUseTimestamp=$false
 	}
-	
+		
 	$getSimpleMessageMethod = [scriptblock]::create({
-		$tsString = $this.ts.toString("yyyy-MM-dd HH:mm:ss");
+		
+		if($this.noUseTimestamp){
+			$tsString = "";
+		} else {
+			$tsString = $this.ts.toString("yyyy-MM-dd HH:mm:ss");
+		}
+		
 		
 		if($this.identString -and $this.identLevel -gt 0){
 			#Calculates number of ident string.

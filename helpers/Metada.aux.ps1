@@ -95,14 +95,24 @@ Function GetAllCmdLetParams {
 
 #Convert a PsCustomOject to hashtable!!!
 Function Object2HashString {
-	param($Objects)
+	param($Objects, [switch]$Expand = $false)
 
 	$ALLObjects = @()
 	foreach($object in $Objects){
 		$PropsString = @()
 		
 		foreach($Prop in $Object.psobject.properties) { 
-			$PropsString += "$($Prop.Name)=$($Prop.Value)"
+			$PropValue = $Prop.Value;
+			
+			if($PropValue -is [HashTable] -and $Expand){
+				$PropValue  = Object2HashString (New-Object PsObject -Prop $PropValue) -Expand
+			} else {
+				if($PropValue){
+					$PropValue = $PropValue.toString()
+				}
+			}
+			
+			$PropsString	 += "$($Prop.Name)=$($PropValue)";
 		}
 		
 		$ALLObjects += "@{"+($PropsString -join ";")+"}"
@@ -112,7 +122,6 @@ Function Object2HashString {
 
 	return ($ALLObjects -join "`r`n");
 }
-
 
 
 #Get specific version number from a Product version string from SQL Server. This can be obtained with SERVERPROPERTY('ProductVersion')
