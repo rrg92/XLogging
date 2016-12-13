@@ -331,7 +331,7 @@ Function GetLogObject {
 					}
 				}
 				
-				if($this.ExternalVerboseMode){
+				if($this.ExternalVerboseMode -or ($VerbosePreference -and $VerbosePreference -ne "SilentlyContinue")){
 					$IsVerbose = $true;
 				}
 				
