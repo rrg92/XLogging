@@ -18,7 +18,7 @@ Function GetLogObject {
 	$PublicProperties = @{
 		LogLevel = 2
 		LogTo = @("#")
-		UseDLD=$true #Try discover message level based on characters. For this work, the default log level must set to $null...
+		UseDLD=$true #Try discover message level based on characters
 		DLDScript=$null #Try discover message level based on characters
 		ExternalVerboseMode=$false
 		RandomFileNamePrefix="Log"
@@ -28,15 +28,11 @@ Function GetLogObject {
 		HConfigs = @{} #Specific configurations specific for each handler. This configurations overrides global.
 		IdentString = "`t" #Controls the character used for identiation.
 		
-		#Enable debugging log messages of the log object!
-		debugmode 		= $false
-		dyndebugscript	= $null
-		
 		#Contains internal data must be not modified by user.
 		internal=@{
 					START_TS=(Get-Date)
 					RANDOM_LOG_FILE=$null
-					DESTINATON_HANDLERS=$null;
+					DESTINATON_HANDLERS=(GetLogDestinationsHandlers);
 					FILE_INITIALIZED=$false
 					RETAINING=$FALSE
 					RETAINED_LOG_PACKETS=@()
@@ -46,12 +42,10 @@ Function GetLogObject {
 							IDENT_MARKS=@{} #Used to track marks
 						}
 					METHODS = @{};
-					DEFAULT_LOG_LEVEL = $null;
 				} 
 	}
 
 	$o = New-Object PsObject -Prop $PublicProperties
-	$o.internal.DESTINATON_HANDLERS = (GetLogDestinationsHandlers $o);
 	
 	#INTERNAL METHODS
 		
@@ -140,7 +134,6 @@ Function GetLogObject {
 				
 				$LogPacket = (NewLogPacket -LogObject $LogObject -message $Options.message -ts (Get-Date) -level $Options.Level);
 				$LogPacket.forceNoBuffer = $Options.forceNoBuffer;
-				$LogPacket.debugID		= $Options.debugID;
 				$LogPacket.style.BackgroundColor = $Options.bcolor;
 				$LogPacket.style.ForegroundColor = $Options.fcolor
 				
@@ -160,10 +153,6 @@ Function GetLogObject {
 				}
 				
 				#Determining current level, if not already determined.
-				if(!$LogPacket.level){
-					$LogPacket.level = $LogObject.internal.DEFAULT_LOG_LEVEL
-				}
-				
 				if(!$LogPacket.level){
 					$LogPacket.level = "PROGRESS"  #Default...
 	
@@ -204,7 +193,6 @@ Function GetLogObject {
 		$LogMethodEx = [scriptblock]::create({
 			param($Options = @{})
 			
-
 			<#
 				All log methods Options:
 					message 		- The message to be logged
@@ -225,7 +213,6 @@ Function GetLogObject {
 					identKeepFlow	- Dont change flow for next packets. Useful only with applyThis.
 					blankLine		- write a blank line to the log. All other params will ignored.
 					noUseTimestamp	- dont put a timestamp on final message.
-					debugID			- a string to be identified on debugging dynamic script!
 			#>
 			
 			try {
@@ -235,134 +222,83 @@ Function GetLogObject {
 				
 				$LogPacket = & $this.internal.METHODS.ConfigureLogPacket -LogObject $this -Options $Options;
 
-				if($this.debugmode){
-				
-					#Determine the level os debugs based on script...
-					if($this.dyndebugscript){
-						. $this.dyndebugscript;
-					}
-					
-					$PacketString = Object2HashString $LogPacket -Expand;
-					$this.debuglog("Current Log Packet: $PacketString");
-				}
-			
-			
-
 				#At this point we can determine if loggin must be out...
 				
+				# if this code running under Verbose powershell mode, use a verbose to handler to write output...
+					#This will no check requested level vs current level because verbose mode assume any logging must be out...
+ 				if( $this.IsInVerbose() ){
+					& $DestinationHandlers.VERBOSE $LogPacket;
+				}
+				
+
 				#If this packet was logged with retention option...
 				if($LogPacket.retain){
 					$this.internal.RETAINING=$true;
 				} 
 
 				#If flush was specifified. Note flush have priority over retain...
-				
 				if($LogPacket.flush)  {
 					$this.internal.RETAINING=$false;
-					$FlushFest = $true;
-				} else {
-					$FlushFest = $false;
+					$LogPacket.flushedPackets = $this.internal.RETAINED_LOG_PACKETS;
+					$this.internal.RETAINED_LOG_PACKETS = @();
 				}
 
+				#Check destinations...
 
-				#Here is the destination loop.
-				#Here, is where the each specified destination is verified to determine if we can log to it!
-				$this.debuglog("Entering on main destination loop...")
-				foreach($LogDestination in $this.LogTo) {
-					$AllowedLevel = $null;
-					
-					#If destination is a hashtable, broken the parts...
-					if($LogDestination -is [hashtable]){
-						$AllowedLevel 		= $LogDestination.LogLevel;
-						$LogDestination		= $LogDestination.LogTo;
-					}
-					
-					$this.debuglog("dest: $LogDestination | Allowed: $AllowedLevel");
-						
-					# if this code running under Verbose powershell mode, use a verbose to handler to write output...
-						#This will no check requested level vs current level because verbose mode assume any logging must be out...
-					if( $this.IsInVerbose() ){
-						$this.debuglog("Verbose enabled!");
-						& $DestinationHandlers.VERBOSE.script $LogPacket;
-					}
+				if( $this.canLog($LogPacket.level) )  { #If actual level <= required level.
 				
-					
-					
-					#If cannot log, continue...
-					if( !$this.canLog($LogPacket.level, $AllowedLevel) ){
-						continue;
-					}
-					
-					$this.debuglog("This destination can log!", "verbose");
-
-					#Now, the destination handler will be determined based on LogDestinations...
-					$Handler = $null;
-					$HandlerArgs = @{LogPacket=$LogPacket;Destination=$LogDestination};
-					$ElegibleArgs = @{	LogObject=$this
-										LogPacket=$LogPacket
-										LogDestination=$LogDestination
-										CallHandler = $true;
-									};
-									
-					#iterates over handler to discovery the handler...
-					$DestinationHandlers.GetEnumerator() | %{
-						
-						if($this.debugmode){
-							$this.debuglog("Inside handler discovery loop..,", "verbose")
-							$this.debuglog("Handler: $($_.Key) | Elegible Script: $($_.Value.elegible)")
-						}
-					
-						if($_.Value.elegible){
-							if( (& $_.Value.elegible $ElegibleArgs) -eq $true){
-								$Handler = $_.Value;
-								$this.debuglog("*** $($_.key) was CHOOSED! ***")
-								return;
-							} 
-						}
-					}
-					
-					if(!$Handler){
-						$Handler = $DestinationHandlers.FILE;
+					if($this.internal.RETAINING){
+						$this.internal.RETAINED_LOG_PACKETS += $LogPacket;
+						return;
 					}
 
-					if($this.debugmode){
-						$HandlerString = Object2HashString $Handler;
-						$this.debuglog("Handler: $HandlerString");
-					}
+					foreach($LogDestination in $this.LogTo) {
 					
-					$this.debuglog("Reatining ? $($this.internal.RETAINING) CallHandler? $($ElegibleArgs.CallHandler)");
-					
-					
-					if($Handler){
-					
-						#If retention was enabled, the packet will be queued on the destination retention queue...
-						#This will be used next flush to this target!
-						if($this.internal.RETAINING){
-							$this.debuglog("reatining...");
-							$Handler.retainPacket($LogPacket, $LogDestination);
-							$this.debuglog("retained called...");
+						if($LogDestination -is [scriptblock]){
+							& $DestinationHandlers.SCRIPTBLOCK $LogPacket $LogDestination;
 							continue;
 						}
 						
-						#If it times tog et flushed packets...
-						if($FlushFest){
-							$this.debuglog("flushing fest!");
-							$LogPacket.flushedPackets = $Handler.flushPackets($LogDestination);
+						if($LogDestination -eq "#"){
+							$BufferIsHost = $this.BufferIsHost;
+							
+							if($LogPacket.forceNoBuffer){ #if user wants force buffer...
+								$BufferIsHost = $false;
+							}
+							
+						
+							if(!$BufferIsHost){
+								& $DestinationHandlers.HOST $LogPacket $LogDestination;
+							}
+							
+							continue;
 						}
 						
-						if($ElegibleArgs.CallHandler){
-							$this.debuglog("about to call handler!");
-							& $Handler.script @HandlerArgs
-							$this.debuglog("call ended!");
+						if($LogDestination -eq "#SQLAGENT"){
+							& $DestinationHandlers.SQLAGENT $LogPacket $LogDestination;
+							continue;
 						}
 						
-					} else {
-						throw 'FATAL_ERROR: HandlerNotDetermined!'
+						if($LogDestination -eq "#BUFFER"){
+							if(!$LogPacket.forceNoBuffer){
+								& $DestinationHandlers.BUFFER $LogPacket $LogDestination;
+							}
+							continue;
+						}
+						
+						#Is a path...
+						if(Test-Path $LogDestination){
+							if(IsDirectory $LogDestination){
+								& $DestinationHandlers.FOLDER $LogPacket $LogDestination;
+								continue;
+							}
+						}
+						
+						#If nothing else, its considered a file...
+						& $DestinationHandlers.FILE $LogPacket $LogDestination;
+						
 					}
-					
-					
 				}
-				
 			} catch {
 				if(!$this.IgnoreLogFail){
 					throw;
@@ -370,7 +306,7 @@ Function GetLogObject {
 			}
 		})
 
-
+		
 		$LogSQLErrors = [scriptblock]::create({
 			param($exception,$level = "PROGRESS",$forceNoBuffer = $false)
 			
@@ -405,18 +341,11 @@ Function GetLogObject {
 			
 		#Test if log object can log on specific log level...
 		#It is useful for the user execute some codes only if a specific log level is active...
-		#first param is the current message level...
-		#Second parameter is the level allowed. If null, the method will query LogLevel property of the log...
 		$canLog = [scriptblock]::create({
-				param($LogLevel, $AllowedLevel = $null)
-		
-				if(!$AllowedLevel){
-					$AllowedLevel = $this.LogLevel
-				}
-				
+				param($LogLevel)
 		
 				#If desired level <= max level, then return true.
-				$can = (GetLogLevelNumber($LogLevel)) -le (GetLogLevelNumber($AllowedLevel))
+				$can = (GetLogLevelNumber($LogLevel)) -le (GetLogLevelNumber($this.LogLevel))
 				return $can;
 			})
 			
@@ -431,11 +360,6 @@ Function GetLogObject {
 				}
 		
 				$finalIdentLevel -= $DropCount;
-				
-				if($finalIdentLevel -lt 0){
-					$finalIdentLevel = 0;
-				}
-				
 				$this.internal.IDENT_CONTROL.CURRENT_LEVEL = $finalIdentLevel;
 				return;
 			})
@@ -455,31 +379,7 @@ Function GetLogObject {
 				
 			})
 		
-		
-		#Sets a default log level!
-		$DefaultLogLevelMethod = [scriptblock]::create({
-					param($LogLevel = $null)
-
-					if( (ValidateLogLevel $LogLevel) -or $LogLevel -eq $null){
-						$this.internal.DEFAULT_LOG_LEVEL = $LogLevel;
-					} else {
-						throw "INVALID_LOG_LEVEL: $LogLevel";
-					}
-		
-			})
-		
-		
-		$debuglog = {
-			param($m, $writetype = "debug")
 			
-			if($this.debugmode){
-				$cmdlet = "write-$writetype";
-				& $cmdlet $m;
-			}
-		}	
-		
-
-		
 	$o | Add-Member -Type ScriptMethod -Name Log -Value  $LogMethod;
 	$o | Add-Member -Type ScriptMethod -Name LogEx -Value  $LogMethodEx;
 	$o | Add-Member -Type ScriptMethod -Name LogSQLErrors -Value  $LogSQLErrors;
@@ -488,8 +388,6 @@ Function GetLogObject {
 	$o | Add-Member -Type ScriptMethod -Name dropIdent -Value  $DropIdentMethod
 	$o | Add-Member -Type ScriptMethod -Name getIdentLevel -Value  $GetIdentMethod
 	$o | Add-Member -Type ScriptMethod -Name setIdentLevel -Value  $SetIdentMethod
-	$o | Add-Member -Type ScriptMethod -Name setDefaultLogLevel -Value  $DefaultLogLevelMethod
-	$o | Add-Member -Type ScriptMethod -Name debuglog -Value  $debuglog
 
 	return $o;
 }
@@ -525,7 +423,6 @@ Function NewLogPacket {
 		identLevel=0;
 		identString=$null;
 		noUseTimestamp=$false
-		debugID = $null
 	}
 		
 	$getSimpleMessageMethod = [scriptblock]::create({
@@ -654,23 +551,20 @@ Function DefaultDDLScript {
 }
 
 Function GetLogDestinationsHandlers {
-	param($LogObject)
-	
+
 	return @{
-		VERBOSE = NewDestinationHandle $LogObject  {
+		VERBOSE = {
 			param($LogPacket,$Destination = $null)
 
 			if($LogPacket.LogObject.IsInVerbose()){
 				$LogPacket.alreadyScreened = $true;
-			} 
+			}
 			
 			write-verbose ($LogPacket.getVerboseMessage());
 		}
 	
-		HOST = NewDestinationHandle $LogObject {
+		HOST = {
 			param($LogPacket,$Destination = $null)
-			
-			$LogPacket.LogObject.debuglog("Inside host destination handler!");
 			
 			if($LogPacket.alreadyScreened) {
 				return;
@@ -691,32 +585,10 @@ Function GetLogDestinationsHandlers {
 			}
 			
 			write-host @CmdLetParams;
-		} -ElegibleScript {
-			param($HandlerParams)
-			
-			
-			
-			if($HandlerParams.LogDestination -ne "#"){
-				return $false;
-			}
-			
-			$BufferIsHost = $HandlerParams.LogObject.BufferIsHost;
-			
-			if($LogPacket.forceNoBuffer){ #if user wants force buffer...
-				$BufferIsHost = $false;
-			}
-			
-			if($BufferIsHost){
-				$HandlerParams.CallHandler = $false;
-			}
-			
-			return $true;
 		}
 
-		FILE = NewDestinationHandle $LogObject {
+		FILE = {
 			param($LogPacket,$Destination)
-			
-			$LogPacket.LogObject.debuglog("Inside FILE destination handler!");
 			
 			$Destination | %{
 				if(!$LogPacket.LogObject.internal.FILE_INITIALIZED){
@@ -733,33 +605,19 @@ Function GetLogDestinationsHandlers {
 			}
 		}
 		
-		SCRIPTBLOCK =  NewDestinationHandle $LogObject {
+		SCRIPTBLOCK = {
 			param($LogPacket,$Destination)
 			
-			$LogPacket.LogObject.debuglog("Inside SCRIPTBLOCK destination handler!");
-			
 			& $Destination $LogPacket
-		} -ElegibleScript {
-			param($HandlerParams)
-			return $HandlerParams.LogDestination -is [scriptblock];
 		}
 		
-		SQLAGENT = NewDestinationHandle $LogObject  {
+		SQLAGENT = {
 			param($LogPacket, $Destination = $null)
-			
-			$LogPacket.LogObject.debuglog("Inside SQLAGENT destination handler!");
-			
 			write-output $LogPacket.getSimpleMessage();
-		} -ElegibleScript {
-			param($HandlerParams)
-			
-			return $HandlerParams.LogDestination -eq "#SQLAGENT";
 		}
 		
-		FOLDER =  NewDestinationHandle $LogObject {
+		FOLDER = {
 			param($LogPacket, $Destination = $null)
-			
-			$LogPacket.LogObject.debuglog("Inside FOLDER destination handler!");
 			
 			if($LogPacket.LogObject.internal.Contains("RANDOM_LOG_FILE")){
 				$RandomLogFile = $LogPacket.LogObject.internal.RANDOM_LOG_FILE;
@@ -779,91 +637,18 @@ Function GetLogDestinationsHandlers {
 			
 			
 			$LogPacket.getSimpleMessage() >> $RandomLogFile;
-		} -ElegibleScript {
-			param($HandlerParams)
-			
-			return [IO.Directory]::Exists([string]$HandlerParams.LogDestination);
 		}
 
-		BUFFER =  NewDestinationHandle $LogObject {
+		BUFFER = {
 				param($LogPacket,$Destination = $null)
-				
-				$LogPacket.LogObject.debuglog("Inside BUFFER destination handler!");
 				
 				$LogPacket.LogObject.OutBuffer += @($LogPacket.getSimpleMessage())
 				$LogPacket.buffered = $true;
-			} -ElegibleScript {
-				param($HandlerParams)
-				
-				if($HandlerParams.LogDestination -ne "#BUFFER"){
-					return $false;
-				}
-				
-				if($HandlerParams.LogPacket.forceNoBuffer){
-					$HandlerParams.CallHandler = $false;
-				}
-				
-				return $true;
 			}
 	
 	
 	}
 
 }
-
-
-#Creates a new destination handler.
-#A destination handler is a object that knows all about a specific destination type.
-#It acts like a agent between log engine and the destination. All handlers all maintaned by developers and users just 
-#needs knows about supported destinations! One destination handler can handle one or more destinations types!
-Function NewDestinationHandle {
-	param($LogObject, $Script, $ElegibleScript = $null)
-	
-	$DH = New-Object PsObject -Prop @{
-							retention_queue = @{};
-							script			= $Script;
-							elegible		= $ElegibleScript
-							logObject		= $LogObject
-						}
-						
-	$Methods = @{
-		retainPacket = {
-			param($Packet, $Destination)
-			$rq = $this.retention_queue;
-			$d = $Destination.toString();
-			
-			if(!$rq.Contains($d)){
-				$rq.add($d,@());
-			}
-			
-			$rq[$d] += $Packet;
-			$this.LogObject.debuglog("Queue count: $($rq[$d].count) Destination queue: $($Destination)")
-		}
-		
-		flushPackets = {
-			param($Destination)
-			
-			$rq = $this.retention_queue;
-			$d = $Destination.toString();
-			
-			if($rq.Contains($d)){
-				$Packets = $rq[$d];
-				$rq[$d] = @();
-			}
-			
-			$this.LogObject.debuglog("Flushed count: $($Packets.count) Destination queue: $($Destination)")
-			return $Packets;
-		}
-	}
-	
-	
-	$Methods.GetEnumerator() | %{
-		$DH | Add-Member -Type ScriptMethod -Name $_.Key -Value $_.Value;
-	}
-
-	
-	return $DH;
-}
-
 
 
