@@ -92,6 +92,9 @@ Function Invoke-Log {
 		,#Dont put a timestamp on message
 			[switch]$NoUseTimestamp = $false
 			
+		,#For debugging purposes!
+			$debugID = $null
+			
 		,#This is the log object! Use the New-LogObject to create one.
 			[Parameter(Mandatory=$true,ValueFromPipeline=$true)]
 			$LogObject
@@ -133,6 +136,7 @@ Function Invoke-Log {
 		identApplyThis	= $ApplyThis
 		identKeepFlow	= $KeepFlow
 		noUseTimestamp	= $NoUseTimestamp
+		debugID			= $debugID
 	};
 		
 	
