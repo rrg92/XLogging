@@ -173,3 +173,17 @@ Function Invoke-Log {
 Function Get-LogLevels {
 	return (GetLogLevels)
 }
+
+#Set the default log level of logged messages
+Function Set-DefaultLogLevel {
+	param(
+		#This is the log object! Use the New-LogObject to create one.
+		[Parameter(Mandatory=$true,ValueFromPipeline=$true)]
+		$LogObject
+		
+		,#The default level value. Use Get-LogLevels to valid log levels list
+			$DefaultLevel = $null
+	)
+	
+	$LogObject.setDefaultLogLevel($DefaultLevel);
+}
