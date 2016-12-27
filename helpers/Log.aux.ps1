@@ -389,10 +389,15 @@ Function GetLogObject {
 		
 		$InVerboseMode = [scriptblock]::create({
 				$IsVerbose =  $false;
-				if($PSCmdlet.MyInvocation.BoundParameters.Contains){
-					if($PSCmdlet.MyInvocation.BoundParameters.Contains("Verbose")){
-						$IsVerbose = $PSCmdlet.MyInvocation.BoundParameters["Verbose"].IsPresent
+				
+				try {
+					if($PSCmdlet.MyInvocation.BoundParameters.Contains){
+						if($PSCmdlet.MyInvocation.BoundParameters.Contains("Verbose")){
+							$IsVerbose = $PSCmdlet.MyInvocation.BoundParameters["Verbose"].IsPresent
+						}
 					}
+				} catch {
+					$IsVerbose = $false;
 				}
 				
 				if($this.ExternalVerboseMode -or ($VerbosePreference -and $VerbosePreference -ne "SilentlyContinue")){
