@@ -741,7 +741,7 @@ Function GetLogDestinationsHandlers {
 				if(!$LogPacket.LogObject.internal.FILE_INITIALIZED){
 					try {
 						if(!$LogPacket.LogObject.append){
-							New-Item -Force -ItemType File -Path $_ 
+							[void](New-Item -Force -ItemType File -Path $_)
 						}
 						$LogPacket.LogObject.internal.FILE_INITIALIZED = $true;		
 					} catch {
