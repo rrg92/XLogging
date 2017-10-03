@@ -275,4 +275,19 @@ Function Set-DefaultLogLevel {
 	$LogObject.setDefaultLogLevel($DefaultLevel);
 }
 
+#Returns true if can log.
+Function Test-LogLevel {
+	param(
+		
+		#The desired log level to check if can
+		$LogLevel
+		
+		,#This is the log object! Use the New-LogObject to create one.
+		[Parameter(Mandatory=$true,ValueFromPipeline=$true)]
+		$LogObject
+	)
+	
+	return $LogObject.canlog($LogLevel);
+}
+
 

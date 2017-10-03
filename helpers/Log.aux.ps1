@@ -27,10 +27,14 @@ Function GetLogObject {
 		IgnoreLogFail=$true
 		HConfigs = @{} #Specific configurations specific for each handler. This configurations overrides global.
 		IdentString = "`t" #Controls the character used for identiation.
-		
+		append		= $false #controls if log must be appended!
+		consoleHostOnly = $true #Just logs write-host (due to # in LogTO) if currenthostName is ConsoleHost
+
 		#Enable debugging log messages of the log object!
 		debugmode 		= $false
 		dyndebugscript	= $null
+
+
 		
 		#Contains internal data must be not modified by user.
 		internal=@{
@@ -695,7 +699,17 @@ Function GetLogDestinationsHandlers {
 				$CmdLetParams.add("ForegroundColor",$LogPacket.style.ForegroundColor)
 			}
 			
-			write-host @CmdLetParams;
+			
+			if($LogPacket.LogObject.consoleHostOnly){
+				$CanHostLog = $host.Name -eq "ConsoleHost";
+			} else {
+				$CanHostLog = $true;
+			}
+
+			if($CanHostLog){
+				write-host @CmdLetParams;
+			}
+			
 		} -ElegibleScript {
 			param($HandlerParams)
 			
@@ -726,7 +740,9 @@ Function GetLogDestinationsHandlers {
 			$Destination | %{
 				if(!$LogPacket.LogObject.internal.FILE_INITIALIZED){
 					try {
-						echo "" > $_;
+						if(!$LogPacket.LogObject.append){
+							New-Item -Force -ItemType File -Path $_ 
+						}
 						$LogPacket.LogObject.internal.FILE_INITIALIZED = $true;		
 					} catch {
 						$LogPacket.LogObject.internal.FILE_INITIALIZED = $false;
